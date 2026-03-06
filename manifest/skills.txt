@@ -1,0 +1,2 @@
+# agentSDLC skills manifest
+idea-to-prd

@@ -165,3 +165,60 @@ The repo will gradually become a practical agent operating system for software d
 The aim is not abstraction for its own sake.
 
 The aim is to make AI-assisted delivery structured enough to trust.
+
+## Install globally into Claude Code
+
+This installs agentSDLC skills into your global Claude Code skills directory:
+
+`~/.claude/skills`
+
+It does not remove or overwrite unrelated existing Claude setup.
+
+### Install all skills
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- install --all
+
+```
+
+### Install one skill
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- install --skill idea-to-prd
+
+```
+
+### Update all managed skills
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- update --all
+
+```
+
+### List installed skills
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- list
+
+```
+
+### Run doctor
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- doctor
+
+```
+
+### Uninstall one managed skill
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- uninstall --skill idea-to-prd
+
+```
+
+### Uninstall all managed skills
+
+```
+curl -fsSL https://raw.githubusercontent.com/famerazak/agentSDLC/main/scripts/agentsdlc-installer.sh | bash -s -- uninstall --all
+
+```

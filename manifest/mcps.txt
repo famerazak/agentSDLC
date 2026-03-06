@@ -1,0 +1,4 @@
+# Reserved for future MCP installation support
+# Example format later:
+# github-mcp|optional|Used for repo inspection and richer build briefs
+# linear-mcp|optional|Used for ticket-aware slicing and planning
