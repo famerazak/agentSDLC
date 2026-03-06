@@ -14,31 +14,22 @@ AGENTSDLC_DIR="${CLAUDE_DIR}/agentsdlc"
 META_DIR="${AGENTSDLC_DIR}/meta"
 VERSIONS_DIR="${META_DIR}/versions"
 TMP_DIR=""
-
-COLOUR_RED="$(printf '\033[31m')"
-COLOUR_GREEN="$(printf '\033[32m')"
-COLOUR_YELLOW="$(printf '\033[33m')"
-COLOUR_BLUE="$(printf '\033[34m')"
-COLOUR_RESET="$(printf '\033[0m')"
+EXTRACTED_ROOT=""
 
 log() {
-  printf "%b\n" "${COLOUR_BLUE}$*${COLOUR_RESET}"
-}
-
-success() {
-  printf "%b\n" "${COLOUR_GREEN}$*${COLOUR_RESET}"
+  printf "%s\n" "$*"
 }
 
 warn() {
-  printf "%b\n" "${COLOUR_YELLOW}$*${COLOUR_RESET}"
+  printf "WARNING: %s\n" "$*" >&2
 }
 
 error() {
-  printf "%b\n" "${COLOUR_RED}$*${COLOUR_RESET}" >&2
+  printf "ERROR: %s\n" "$*" >&2
 }
 
 cleanup() {
-  if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
+  if [ -n "${TMP_DIR}" ] && [ -d "${TMP_DIR}" ]; then
     rm -rf "${TMP_DIR}"
   fi
 }
@@ -60,12 +51,6 @@ Options:
   --skill <name>     Target a specific skill. May be provided multiple times
   --force            Replace an existing skill folder if present
   -h, --help         Show this help
-
-Examples:
-  ./scripts/agentsdlc-installer.sh install --all
-  ./scripts/agentsdlc-installer.sh install --skill idea-to-prd
-  ./scripts/agentsdlc-installer.sh update --all --force
-  ./scripts/agentsdlc-installer.sh uninstall --skill idea-to-prd
 EOF
 }
 
@@ -77,53 +62,63 @@ ensure_dirs() {
 }
 
 ensure_dependencies() {
-  local missing=0
-
-  for cmd in curl tar mktemp; do
+  missing=0
+  for cmd in curl tar mktemp find grep sed; do
     if ! command -v "${cmd}" >/dev/null 2>&1; then
       error "Missing required command: ${cmd}"
       missing=1
     fi
   done
 
-  if [[ "${missing}" -ne 0 ]]; then
+  if [ "${missing}" -ne 0 ]; then
     exit 1
   fi
 }
 
 download_archive() {
   TMP_DIR="$(mktemp -d)"
-  local archive_file="${TMP_DIR}/repo.tar.gz"
+  archive_file="${TMP_DIR}/repo.tar.gz"
 
   log "Downloading ${REPO_NAME} from GitHub..."
   curl -fsSL "${ARCHIVE_URL}" -o "${archive_file}"
 
   log "Extracting archive..."
   tar -xzf "${archive_file}" -C "${TMP_DIR}"
+
+  EXTRACTED_ROOT="$(find "${TMP_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+
+  if [ -z "${EXTRACTED_ROOT}" ] || [ ! -d "${EXTRACTED_ROOT}" ]; then
+    error "Could not determine extracted repo root."
+    exit 1
+  fi
 }
 
 repo_root() {
-  printf "%s/%s-%s" "${TMP_DIR}" "${REPO_NAME}" "${BRANCH}"
+  printf "%s" "${EXTRACTED_ROOT}"
 }
 
 manifest_path() {
   printf "%s/manifest/skills.txt" "$(repo_root)"
 }
 
+version_path() {
+  printf "%s/manifest/version.txt" "$(repo_root)"
+}
+
 version_value() {
-  if curl -fsSL "${RAW_BASE_URL}/manifest/version.txt" >/dev/null 2>&1; then
-    curl -fsSL "${RAW_BASE_URL}/manifest/version.txt"
+  if [ -f "$(version_path)" ]; then
+    cat "$(version_path)"
   else
     printf "%s" "${BRANCH}"
   fi
 }
 
 read_all_skills() {
-  local manifest
   manifest="$(manifest_path)"
 
-  if [[ ! -f "${manifest}" ]]; then
+  if [ ! -f "${manifest}" ]; then
     error "Manifest not found at ${manifest}"
+    error "Make sure manifest/skills.txt exists in the GitHub repo."
     exit 1
   fi
 
@@ -131,33 +126,29 @@ read_all_skills() {
 }
 
 skill_source_dir() {
-  local skill_name="$1"
+  skill_name="$1"
   printf "%s/.claude/skills/%s" "$(repo_root)" "${skill_name}"
 }
 
 skill_target_dir() {
-  local skill_name="$1"
+  skill_name="$1"
   printf "%s/%s" "${SKILLS_DIR}" "${skill_name}"
 }
 
 skill_version_file() {
-  local skill_name="$1"
+  skill_name="$1"
   printf "%s/%s.version" "${VERSIONS_DIR}" "${skill_name}"
 }
 
 is_managed_by_agentsdlc() {
-  local skill_name="$1"
-  local target
+  skill_name="$1"
   target="$(skill_target_dir "${skill_name}")"
-
-  [[ -f "${target}/.agentsdlc-managed" ]]
+  [ -f "${target}/.agentsdlc-managed" ]
 }
 
 write_management_marker() {
-  local skill_name="$1"
-  local target version_file version
+  skill_name="$1"
   target="$(skill_target_dir "${skill_name}")"
-  version_file="$(skill_version_file "${skill_name}")"
   version="$(version_value)"
 
   cat > "${target}/.agentsdlc-managed" <<EOF
@@ -169,36 +160,41 @@ version=${version}
 installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
-  printf "%s\n" "${version}" > "${version_file}"
+  printf "%s\n" "${version}" > "$(skill_version_file "${skill_name}")"
 }
 
 remove_management_marker() {
-  local skill_name="$1"
-  local target version_file
+  skill_name="$1"
   target="$(skill_target_dir "${skill_name}")"
-  version_file="$(skill_version_file "${skill_name}")"
 
   rm -f "${target}/.agentsdlc-managed"
-  rm -f "${version_file}"
+  rm -f "$(skill_version_file "${skill_name}")"
 }
+
+ALL_REQUESTED=0
+FORCE=0
+TARGET_SKILLS=""
+RESOLVED_SKILLS=""
 
 parse_targets() {
   ALL_REQUESTED=0
   FORCE=0
-  TARGET_SKILLS=()
+  TARGET_SKILLS=""
+  RESOLVED_SKILLS=""
 
-  while [[ $# -gt 0 ]]; do
+  while [ $# -gt 0 ]; do
     case "$1" in
       --all)
         ALL_REQUESTED=1
         shift
         ;;
       --skill)
-        if [[ $# -lt 2 ]]; then
+        if [ $# -lt 2 ]; then
           error "--skill requires a value"
           exit 1
         fi
-        TARGET_SKILLS+=("$2")
+        TARGET_SKILLS="${TARGET_SKILLS}
+$2"
         shift 2
         ;;
       --force)
@@ -219,43 +215,41 @@ parse_targets() {
 }
 
 resolve_targets() {
-  if [[ "${ALL_REQUESTED}" -eq 1 ]]; then
-    mapfile -t RESOLVED_SKILLS < <(read_all_skills)
-  elif [[ "${#TARGET_SKILLS[@]}" -gt 0 ]]; then
-    RESOLVED_SKILLS=("${TARGET_SKILLS[@]}")
+  if [ "${ALL_REQUESTED}" -eq 1 ]; then
+    RESOLVED_SKILLS="$(read_all_skills)"
+  elif [ -n "${TARGET_SKILLS}" ]; then
+    RESOLVED_SKILLS="$(printf "%s\n" "${TARGET_SKILLS}" | sed '/^[[:space:]]*$/d')"
   else
     warn "No skill specified. Defaulting to --all"
-    mapfile -t RESOLVED_SKILLS < <(read_all_skills)
+    RESOLVED_SKILLS="$(read_all_skills)"
   fi
 }
 
 check_skill_exists_in_archive() {
-  local skill_name="$1"
-  local src
+  skill_name="$1"
   src="$(skill_source_dir "${skill_name}")"
 
-  if [[ ! -d "${src}" ]]; then
-    error "Skill '${skill_name}' not found in repo archive"
+  if [ ! -d "${src}" ]; then
+    error "Skill '${skill_name}' not found in repo archive at ${src}"
     return 1
   fi
 
-  if [[ ! -f "${src}/SKILL.md" ]]; then
+  if [ ! -f "${src}/SKILL.md" ]; then
     error "Skill '${skill_name}' is missing SKILL.md"
     return 1
   fi
 }
 
 install_one_skill() {
-  local skill_name="$1"
-  local src target
+  skill_name="$1"
   src="$(skill_source_dir "${skill_name}")"
   target="$(skill_target_dir "${skill_name}")"
 
   check_skill_exists_in_archive "${skill_name}"
 
-  if [[ -e "${target}" ]]; then
+  if [ -e "${target}" ]; then
     if is_managed_by_agentsdlc "${skill_name}"; then
-      if [[ "${FORCE}" -eq 1 ]]; then
+      if [ "${FORCE}" -eq 1 ]; then
         warn "Replacing managed skill: ${skill_name}"
         rm -rf "${target}"
       else
@@ -270,18 +264,17 @@ install_one_skill() {
 
   cp -R "${src}" "${target}"
   write_management_marker "${skill_name}"
-  success "Installed skill: ${skill_name}"
+  log "Installed skill: ${skill_name}"
 }
 
 update_one_skill() {
-  local skill_name="$1"
-  local src target
+  skill_name="$1"
   src="$(skill_source_dir "${skill_name}")"
   target="$(skill_target_dir "${skill_name}")"
 
   check_skill_exists_in_archive "${skill_name}"
 
-  if [[ ! -e "${target}" ]]; then
+  if [ ! -e "${target}" ]; then
     warn "Skill '${skill_name}' is not installed. Installing it now."
     install_one_skill "${skill_name}"
     return 0
@@ -295,15 +288,14 @@ update_one_skill() {
   rm -rf "${target}"
   cp -R "${src}" "${target}"
   write_management_marker "${skill_name}"
-  success "Updated skill: ${skill_name}"
+  log "Updated skill: ${skill_name}"
 }
 
 uninstall_one_skill() {
-  local skill_name="$1"
-  local target
+  skill_name="$1"
   target="$(skill_target_dir "${skill_name}")"
 
-  if [[ ! -e "${target}" ]]; then
+  if [ ! -e "${target}" ]; then
     warn "Skill '${skill_name}' is not installed."
     return 0
   fi
@@ -315,7 +307,15 @@ uninstall_one_skill() {
 
   rm -rf "${target}"
   remove_management_marker "${skill_name}"
-  success "Removed skill: ${skill_name}"
+  log "Removed skill: ${skill_name}"
+}
+
+for_each_resolved_skill() {
+  callback="$1"
+  printf "%s\n" "${RESOLVED_SKILLS}" | while IFS= read -r skill_name; do
+    [ -n "${skill_name}" ] || continue
+    "${callback}" "${skill_name}"
+  done
 }
 
 list_skills() {
@@ -323,16 +323,9 @@ list_skills() {
 
   printf "\nInstalled skills in %s\n\n" "${SKILLS_DIR}"
 
-  if [[ ! -d "${SKILLS_DIR}" ]]; then
-    printf "No skills directory found.\n"
-    return 0
-  fi
-
-  local found=0
-  local entry skill_name version_file version managed
-
+  found=0
   for entry in "${SKILLS_DIR}"/*; do
-    [[ -d "${entry}" ]] || continue
+    [ -d "${entry}" ] || continue
     found=1
     skill_name="$(basename "${entry}")"
     version_file="$(skill_version_file "${skill_name}")"
@@ -343,14 +336,14 @@ list_skills() {
       managed="yes"
     fi
 
-    if [[ -f "${version_file}" ]]; then
+    if [ -f "${version_file}" ]; then
       version="$(cat "${version_file}")"
     fi
 
-    printf "- %s | managed_by_agentsdlc=%s | version=%s\n" "${skill_name}" "${managed}" "${version}"
+    printf -- "- %s | managed_by_agentsdlc=%s | version=%s\n" "${skill_name}" "${managed}" "${version}"
   done
 
-  if [[ "${found}" -eq 0 ]]; then
+  if [ "${found}" -eq 0 ]; then
     printf "No installed skills found.\n"
   fi
 }
@@ -364,79 +357,65 @@ doctor() {
   printf "Skills dir: %s\n" "${SKILLS_DIR}"
   printf "Meta dir:   %s\n" "${META_DIR}"
 
-  if [[ -d "${SKILLS_DIR}" ]]; then
-    printf "Skills dir exists: yes\n"
-  else
-    printf "Skills dir exists: no\n"
-  fi
-
   if command -v claude >/dev/null 2>&1; then
     printf "Claude Code CLI found: yes\n"
   else
     printf "Claude Code CLI found: no\n"
   fi
 
-  printf "\nManaged skills:\n"
   list_skills
 }
 
 main() {
-  if [[ $# -lt 1 ]]; then
+  if [ $# -lt 1 ]; then
     usage
     exit 1
   fi
 
-  local command="$1"
+  command_name="$1"
   shift
 
   ensure_dependencies
   ensure_dirs
 
-  case "${command}" in
+  case "${command_name}" in
     install)
       parse_targets "$@"
       download_archive
       resolve_targets
-      for skill_name in "${RESOLVED_SKILLS[@]}"; do
-        install_one_skill "${skill_name}"
-      done
-      printf "\n"
-      success "Install complete."
+      for_each_resolved_skill install_one_skill
+      printf "\nInstall complete.\n"
       printf "Restart Claude Code and run /help to verify your skills.\n"
       ;;
     update)
       parse_targets "$@"
       download_archive
       resolve_targets
-      for skill_name in "${RESOLVED_SKILLS[@]}"; do
-        update_one_skill "${skill_name}"
-      done
-      printf "\n"
-      success "Update complete."
+      for_each_resolved_skill update_one_skill
+      printf "\nUpdate complete.\n"
       printf "Restart Claude Code and run /help to verify your skills.\n"
       ;;
     uninstall)
       parse_targets "$@"
-      if [[ "${ALL_REQUESTED}" -eq 1 ]]; then
-        mapfile -t RESOLVED_SKILLS < <(
-          if [[ -d "${SKILLS_DIR}" ]]; then
-            find "${SKILLS_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
-          fi
-        )
+
+      if [ "${ALL_REQUESTED}" -eq 1 ]; then
+        RESOLVED_SKILLS=""
+        for entry in "${SKILLS_DIR}"/*; do
+          [ -d "${entry}" ] || continue
+          RESOLVED_SKILLS="${RESOLVED_SKILLS}
+$(basename "${entry}")"
+        done
       else
-        RESOLVED_SKILLS=("${TARGET_SKILLS[@]}")
+        RESOLVED_SKILLS="$(printf "%s\n" "${TARGET_SKILLS}" | sed '/^[[:space:]]*$/d')"
       fi
 
-      if [[ "${#RESOLVED_SKILLS[@]}" -eq 0 ]]; then
+      if [ -z "${RESOLVED_SKILLS}" ]; then
         error "No skills specified for uninstall."
         exit 1
       fi
 
-      for skill_name in "${RESOLVED_SKILLS[@]}"; do
-        uninstall_one_skill "${skill_name}"
-      done
-      printf "\n"
-      success "Uninstall complete."
+      for_each_resolved_skill uninstall_one_skill
+      printf "\nUninstall complete.\n"
       ;;
     list)
       list_skills
@@ -448,7 +427,7 @@ main() {
       usage
       ;;
     *)
-      error "Unknown command: ${command}"
+      error "Unknown command: ${command_name}"
       usage
       exit 1
       ;;
