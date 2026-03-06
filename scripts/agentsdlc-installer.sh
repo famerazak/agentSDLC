@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_OWNER="${REPO_OWNER:-YOUR_GITHUB_USERNAME}"
+REPO_OWNER="${REPO_OWNER:-famerazak}"
 REPO_NAME="${REPO_NAME:-agentSDLC}"
 BRANCH="${BRANCH:-main}"
 
