@@ -219,14 +219,17 @@ Note any slices that must be completed first.
 
 ---
 
-# Output format
+# Output
 
-Produce:
+1. Generate the vertical slice plan.
+2. Save the result as a Markdown file.
+3. Confirm the saved file location.
 
+Example confirmation:
 
-Then list slices sequentially.
+Saved slice plan to:
 
-Use numbered sections.
+vertical-slices.md
 
 ---
 
@@ -305,3 +308,55 @@ slice-to-build-brief
 # Goal
 
 Turn vague scope into a delivery-ready slice plan.
+
+## Save behaviour
+
+The generated slice plan must be saved to a new Markdown file.
+
+Never overwrite the input PRD.
+
+Default filename:
+vertical-slices.md
+
+If the input file is named something specific, use a related filename.
+
+Examples:
+
+prd.md → vertical-slices.md  
+booking-prd.md → booking-vertical-slices.md  
+caly-prd.md → caly-vertical-slices.md
+
+If a file already exists, append a version:
+
+vertical-slices-v2.md
+vertical-slices-v3.md
+
+After generating the slice plan, write the file to disk and confirm the file path.
+
+Save the file in:
+docs/slices/
+
+If the directory does not exist, create it.
+
+So your project ends up like:
+
+project
+│
+├─ prd.md
+│
+├─ docs
+│   └─ slices
+│        └─ vertical-slices.md
+
+## Recommended naming convention
+
+Use this pattern:
+docs/slices/<product>-vertical-slices.md
+
+Example:
+
+docs/slices/caly-vertical-slices.md
+docs/slices/reframe-vertical-slices.md
+docs/slices/crm-vertical-slices.md
+
+
