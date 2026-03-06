@@ -1,2 +1,3 @@
 # agentSDLC skills manifest
 idea-to-prd
+prd-to-vertical-slices
